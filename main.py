@@ -1,4 +1,4 @@
-import os
+import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Annotated, Any
@@ -7,7 +7,8 @@ import httpx
 
 from fastapi import FastAPI, HTTPException
 from fastapi_utilities import repeat_every
-from pydantic import AliasPath, BaseModel, Field
+from pydantic import AliasPath, BaseModel, Field, field_validator
+from pydantic_core import PydanticUseDefault
 from pydantic_settings import BaseSettings
 
 
@@ -39,7 +40,16 @@ class User(BaseModel):
     uid: Annotated[str, Field(validation_alias="username")]
     mifare_card_ids: Annotated[list[str], Field(validation_alias=AliasPath("attributes", "mifareCardId"))] = []
     unique_card_ids: Annotated[list[str], Field(validation_alias=AliasPath("attributes", "uniquecardId"))] = []
-    membership_expiration: Annotated[int, Field(validation_alias=AliasPath("attributes", "membershipExpirationTimestamp"))]
+    membership_expiration: Annotated[
+        int,
+        Field(validation_alias=AliasPath("attributes", "membershipExpirationTimestamp"))
+    ]
+
+    @field_validator("mifare_card_ids", "unique_card_ids", mode='plain')
+    def use_default_for_missing_cards(cls, v) -> str:
+        if v is None:
+            raise PydanticUseDefault()
+        return v
 
 
 class Settings(BaseSettings):
@@ -74,7 +84,10 @@ async def fetch() -> list[User]:
             headers={"Authorization": f"Bearer {config.authentik_token}"},
             timeout=15.0,
         ) as client:
-        response = await client.get("https://auth.apps.hskrk.pl/api/v3/core/users/?attributes={\"membershipExpirationTimestamp__gt\": 1734998400}&page_size=200")
+        response = await client.get(
+            "https://auth.apps.hskrk.pl/api/v3/core/users/"
+            "?attributes={\"membershipExpirationTimestamp__gt\": 1734998400}&page_size=200",
+        )
         return [
             User(**u)
             for u in response.json()['results']
@@ -85,25 +98,29 @@ async def fetch() -> list[User]:
 async def fetch_users():
     global users
     global users_by_card
-    users = await fetch()
-    users_by_card = {
-        **{
-            mifare.lower(): user
-            for user in users for mifare in user.mifare_card_ids
-        },
-        **{
-            transform_card_number_to_unique(mifare).lower(): user
-            for user in users for mifare in user.mifare_card_ids
-        },
-        **{
-            unique.lower(): user
-            for user in users for unique in user.unique_card_ids
-        },
-        **{
-            transform_card_number_to_mifare(unique).lower(): user
-            for user in users for unique in user.unique_card_ids
-        },
-    }
+    try:
+        users = await fetch()
+    except Exception:
+        logging.exception("Failed to fetch users")
+    else:
+        users_by_card = {
+            **{
+                mifare.lower(): user
+                for user in users for mifare in user.mifare_card_ids
+            },
+            **{
+                transform_card_number_to_unique(mifare).lower(): user
+                for user in users for mifare in user.mifare_card_ids
+            },
+            **{
+                unique.lower(): user
+                for user in users for unique in user.unique_card_ids
+            },
+            **{
+                transform_card_number_to_mifare(unique).lower(): user
+                for user in users for unique in user.unique_card_ids
+            },
+        }
 
 
 @app.get("/users/-/stats")
