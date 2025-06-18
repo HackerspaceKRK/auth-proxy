@@ -1,0 +1,20 @@
+[project]
+name = "auth-proxy"
+version = "0.1.0"
+description = ""
+authors = [
+    {name="GwynBleidD", email="gbd.lin@gmail.com"},
+]
+readme = "README.md"
+requires-python = ">=3.11,<4.0"
+dependencies = [
+    "fastapi~=0.115.12",
+    "fastapi-utilities~=0.3.1",
+    "httpx~=0.28.1",
+    "pydantic>=2.11.4,==2.*.*",
+    "pydantic-settings>=2.9.1,==2.*.*",
+    "uvicorn[standard]~=0.34.2",
+]
+
+[tool.poetry]
+package-mode = false
