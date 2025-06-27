@@ -5,7 +5,7 @@ from typing import Annotated, Any
 
 import httpx
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi_utilities import repeat_every
 from pydantic import AliasPath, BaseModel, Field, field_validator
 from pydantic_core import PydanticUseDefault
@@ -99,6 +99,7 @@ async def fetch_users():
     global users
     global users_by_card
     try:
+        logging.debug("Fetching users from Authentik")
         users = await fetch()
     except Exception:
         logging.exception("Failed to fetch users")
@@ -121,6 +122,7 @@ async def fetch_users():
                 for user in users for unique in user.unique_card_ids
             },
         }
+        logging.debug(f"Fetched {len(users)} users ({len(users_by_card)} cards) from Authentik")
 
 
 @app.get("/users/-/stats")
@@ -139,5 +141,37 @@ async def get_user_stats():
 async def get_user_by_card(card_id: str):
     user = users_by_card.get(card_id.lower())
     if user is None:
+        logging.warning("[WS] Card %s not found", card_id)
         raise HTTPException(status_code=404, detail="Item not found")
+    logging.info("[HTTP] User %s (%s) found", user.uid, card_id)
     return user
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    logging.debug("[WS] New connection")
+    await websocket.accept()
+    try:
+        async for message in websocket.iter_json():
+            logging.debug("[WS] WS Request %r", message)
+            match message:
+                case {"action": "get", "object": "user", **kwargs}:
+                    logging.debug("[WS] Get user %r", kwargs)
+                    if "card_id" in kwargs and isinstance(kwargs["card_id"], str):
+                        user = users_by_card.get(kwargs["card_id"].lower())
+                    else:
+                        user = None
+
+                    if user is None:
+                        logging.warning("[WS] Card %s not found", kwargs.get("card_id"))
+                        await websocket.send_json(
+                            {"status": "error", "error": "user not found"}
+                        )
+                    else:
+                        logging.info("[WS] User %s (%s) found", user.uid, kwargs.get("card_id"))
+                        await websocket.send_json(
+                            {"status": "ok", "object": user.model_dump()}
+                        )
+
+    except WebSocketDisconnect:
+        pass
