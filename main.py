@@ -82,15 +82,22 @@ def auth():
 async def fetch() -> list[User]:
     async with httpx.AsyncClient(
             headers={"Authorization": f"Bearer {config.authentik_token}"},
-            timeout=15.0,
+            timeout=30.0,
         ) as client:
-        response = await client.get(
-            "https://auth.apps.hskrk.pl/api/v3/core/users/"
-            "?attributes={\"membershipExpirationTimestamp__gt\": 1734998400}&page_size=200",
+        url = (
+            "https://auth.apps.hskrk.pl/api/v3/core/users/?"
+            "attributes={\"membershipExpirationTimestamp__gt\": 100}&page_size=50"
         )
+        response = await client.get(url)
+        parsed_response = response.json()
+        results = parsed_response["results"]
+        while parsed_response["pagination"]["next"]:
+            response = await client.get(f"{url}&page={parsed_response["pagination"]["next"]}")
+            parsed_response = response.json()
+            results += parsed_response["results"]
         return [
             User(**u)
-            for u in response.json()['results']
+            for u in results
         ]
 
 
