@@ -1,6 +1,7 @@
 import logging
+import sys
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Annotated, Any
 
 import httpx
@@ -61,9 +62,9 @@ config = Settings()
 
 users: list[User] = []
 users_by_card: dict[str, User] = {}
-users_last_success_run: datetime | None
-users_last_failed_run: datetime | None
-users_last_failed_reason: Any
+users_last_success_run: datetime | None = None
+users_last_failed_run: datetime | None = None
+users_last_failed_reason: Any = None
 
 
 @asynccontextmanager
@@ -108,9 +109,15 @@ async def fetch_users():
     try:
         logging.debug("Fetching users from Authentik")
         users = await fetch()
-    except Exception:
+    except Exception as ex:
         logging.exception("Failed to fetch users")
+        global users_last_failed_run
+        global users_last_failed_reason
+        users_last_failed_run = datetime.now(tz=UTC)
+        users_last_failed_reason = ex
     else:
+        global users_last_success_run
+        users_last_success_run = datetime.now(tz=UTC)
         users_by_card = {
             **{
                 mifare.lower(): user
@@ -135,6 +142,9 @@ async def fetch_users():
 @app.get("/users/-/stats")
 async def get_user_stats():
     return {
+        "last_success_run": users_last_success_run.isoformat().replace("+00:00", "Z") if users_last_success_run else None,
+        "last_failed_run": users_last_failed_run.isoformat().replace("+00:00", "Z") if users_last_failed_run else None,
+        "last_failed_reason": str(users_last_failed_reason) if users_last_failed_reason else None,
         "users": {
             "count": len(users),
         },
