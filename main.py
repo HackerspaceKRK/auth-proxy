@@ -1,8 +1,12 @@
+from asyncio import sleep, StreamReader, StreamWriter
 import logging
 import sys
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, UTC
 from typing import Annotated, Any
+
+from serial_asyncio import open_serial_connection
 
 import httpx
 
@@ -55,10 +59,13 @@ class User(BaseModel):
 
 class Settings(BaseSettings):
     authentik_token: str = ...
+    serial_port: str = ...
 
 
 config = Settings()
 
+serial_reader: StreamReader | None = None
+serial_writer: StreamWriter | None = None
 
 users: list[User] = []
 users_by_card: dict[str, User] = {}
@@ -70,14 +77,24 @@ users_last_failed_reason: Any = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await fetch_users()
+    await connect_serial()
     yield
 
 
 app = FastAPI(lifespan=lifespan)
 
-
 def auth():
     return
+
+async def connect_serial():
+    global serial_reader, serial_writer
+    serial_reader, serial_writer = await open_serial_connection(url=config.serial_port, baudrate=9600)
+
+
+async def open_door():
+    serial_writer.write(b'1')
+    await sleep(5)
+    serial_writer.write(b'0')
 
 
 async def fetch() -> list[User]:
@@ -138,6 +155,12 @@ async def fetch_users():
         }
         logging.debug(f"Fetched {len(users)} users ({len(users_by_card)} cards) from Authentik")
 
+@repeat_every(seconds=5)
+async def check_serial_state():
+    global serial_reader, serial_writer
+    serial_writer.write(b'2')
+    await serial_reader.read(1)
+
 
 @app.get("/users/-/stats")
 async def get_user_stats():
@@ -162,6 +185,19 @@ async def get_user_by_card(card_id: str):
         raise HTTPException(status_code=404, detail="Item not found")
     logging.info("[HTTP] User %s (%s) found", user.uid, card_id)
     return user
+
+@app.get("/door/verify-card")
+async def verify_door_card(card_id: str):
+    user: User = {}
+    try:
+        user = await get_user_by_card(card_id)
+    except HTTPException:
+        return {}
+    
+    if time.time() <= user.membership_expiration:
+        await open_door()
+
+    return {}
 
 
 @app.websocket("/ws")
