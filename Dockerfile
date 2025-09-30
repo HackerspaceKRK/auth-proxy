@@ -23,7 +23,7 @@ COPY ./pyproject.toml ./poetry.lock /code/
 RUN poetry install --no-interaction --no-root --only=main
 
 ARG BUILD_COMMIT_SHA
-ENV BUILD_COMMIT_SHA ${BUILD_COMMIT_SHA:-}
+ENV BUILD_COMMIT_SHA=${BUILD_COMMIT_SHA:-}
 
 #RUN if [ "${BUILD_COMMIT_SHA}" = "localdev" ]; then \
 #    poetry install --no-interaction --no-root --only=dev; \
