@@ -8,7 +8,7 @@ import httpx
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi_utilities import repeat_every
-from pydantic import AliasPath, BaseModel, Field, field_validator
+from pydantic import AliasPath, BaseModel, Field, field_validator, model_validator
 from pydantic_core import PydanticUseDefault
 from pydantic_settings import BaseSettings
 
@@ -54,7 +54,21 @@ class User(BaseModel):
 
 
 class Settings(BaseSettings):
-    authentik_token: str = ...
+    authentik_token: str | None = None
+    authentik_token_file: str | None = None
+
+    @model_validator(mode='after')
+    def set_token(self) -> "Settings":
+        if self.authentik_token:
+            return self
+        if self.authentik_token_file:
+            try:
+                with open(self.authentik_token_file) as f:
+                    self.authentik_token = f.read().strip()
+            except FileNotFoundError:
+                raise ValueError(f"Token file not found: {self.authentik_token_file}")
+            return self
+        raise ValueError("Either AUTHENTIK_TOKEN or AUTHENTIK_TOKEN_FILE must be set")
 
 
 config = Settings()
