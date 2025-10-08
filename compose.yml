@@ -1,20 +1,8 @@
 services:
   auth-proxy:
-    pull_policy: never
     restart: unless-stopped
-    image: auth-proxy
-    build:
-      context: ./
-      args:
-        - BUILD_COMMIT_SHA=localdev
-    #volumes:
-    #- "./:/code/"
+    image: docker pull ghcr.io/hackerspacekrk/auth-proxy:latest
     ports:
       - "8456:80"
-
-    #command: [
-    #"uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80", "--reload",
-    #]
     environment:
-      - AUTHENTIK_TOKEN
-      - API_KEY
+      - AUTHENTIK_TOKEN_FILE=/var/run/secrets/authentik_token
