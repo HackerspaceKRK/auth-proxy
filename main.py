@@ -99,10 +99,10 @@ def auth():
     return
 
 
-async def fetch() -> list[User]:
+async def fetch(timeout=60.0) -> list[User]:
     async with httpx.AsyncClient(
         headers={"Authorization": f"Bearer {config.authentik_token}"},
-        timeout=60.0,
+        timeout=timeout,
     ) as client:
         url = (
             "https://auth.apps.hskrk.pl/api/v3/core/users/?"
@@ -120,8 +120,9 @@ async def fetch() -> list[User]:
                 next_page = parsed_response["pagination"]["next"]
             except httpx.ReadTimeout as t:
                 logging.warning(
-                    f"[HTTP] Timeout reached on fetching users data, page: {next_page}, {t}"
+                    f"[HTTP] Timeout {timeout} reached on fetching users data, page: {next_page}, {t}"
                 )
+                raise t
         return [User(**u) for u in results]
 
 
@@ -203,35 +204,38 @@ async def get_user_by_card(card_id: str):
     return user
 
 
-@app.get("/user/-/sync")
+@app.get("/users/-/sync")
 async def sync_on_demand():
     global users_last_success_run
+    global users_last_failed_run
     current_run = datetime.now(tz=UTC)
-    diff_seconds = (current_run - users_last_success_run).seconds
+    diff_seconds = (
+        current_run
+        - (
+            users_last_success_run
+            if users_last_success_run
+            else datetime(2026, 1, 1, tzinfo=UTC)
+        )
+    ).seconds
     if diff_seconds < 30:
         logging.debug("Skipping fetching users, data fresh")
-        return {
-            "cached": True,
-            "last_success_run": (
-                users_last_success_run.isoformat().replace("+00:00", "Z")
-                if users_last_success_run
-                else None
-            ),
-            "users": {
-                "count": len(users),
-            },
-            "last_failed_run": (
-                users_last_failed_run.isoformat().replace("+00:00", "Z")
-                if users_last_failed_run
-                else None
-            ),
-        }
+        res = {"cached": True, "status": "success"}
+        res.update(await get_user_stats())
+        return res
     else:
         logging.debug(
             "Last successful fetch {diff_seconds}s before. Fetching on demand"
         )
-        fetch_users()
-        return get_user_stats()
+        status = "succes"
+        try:
+            await fetch_users(timeout=120.0)
+        except httpx.HTTPError as err:
+            logging.error(f"Failed to fetch users: {err.message}")
+            users_last_failed_run = current_run
+            status = "failed"
+        res = {"cached": False, "status": status}
+        res.update(await get_user_stats())
+        return res
 
 
 @app.websocket("/ws")
