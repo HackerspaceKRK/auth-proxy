@@ -2,3 +2,5 @@
 compose.override.yml
 __pycache__
 .venv/
+*.swp
+*.pyc
