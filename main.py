@@ -1,10 +1,9 @@
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 import httpx
-
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi_utilities import repeat_every
 from pydantic import AliasPath, BaseModel, Field, field_validator, model_validator
@@ -105,7 +104,7 @@ async def fetch(timeout=60.0) -> list[User]:
         timeout=timeout,
     ) as client:
         url = (
-            "https://auth.apps.hskrk.pl/api/v3/core/users/?"
+            "https://auth.hskrk.pl/api/v3/core/users/?"
             'attributes={"membershipExpirationTimestamp__gt": 100}&page_size=50'
         )
         response = await client.get(url)
