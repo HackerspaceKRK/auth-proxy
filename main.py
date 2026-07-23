@@ -1,10 +1,14 @@
+import hashlib
 import logging
+import struct
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Annotated, Any
+import time
 
 import httpx
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import Response
 from fastapi_utilities import repeat_every
 from pydantic import AliasPath, BaseModel, Field, field_validator, model_validator
 from pydantic_core import PydanticUseDefault
@@ -201,6 +205,58 @@ async def get_user_by_card(card_id: str):
         raise HTTPException(status_code=404, detail="Item not found")
     logging.info("[HTTP] User %s (%s) found", user.uid, card_id)
     return user
+
+EXPORT_RECORD = struct.Struct("<BIQ24s")
+
+
+def build_users_export() -> bytes:
+    records: dict[int, tuple[int, str]] = {}
+    for card, user in users_by_card.items():
+        if not user.membership_expiration or user.membership_expiration < time.time():
+            continue
+        mifare = transform_card_number_to_mifare(card)
+        if len(mifare) != 8:
+            continue
+        try:
+            card_id = int(mifare, 16)
+        except ValueError:
+            continue
+        records[card_id] = (user.membership_expiration, user.uid)
+
+    # Sorted ascending by card id so the firmware can binary-search the file.
+    return b"".join(
+        EXPORT_RECORD.pack(0, card_id, max(expiration, 0), uid.encode()[:24])
+        for card_id, (expiration, uid) in sorted(records.items())
+    )
+
+
+@app.get("/users/-/export.bin")
+async def export_users_bin(request: Request):
+    """Binary dump of all active cards, for devices that cache users locally.
+
+    """
+
+    if len(users) == 0:
+        return Response(
+           status_code=503, content=b"No users to export", media_type="text/plain"
+        )
+
+    blob = build_users_export()
+    etag = '"%s"' % hashlib.sha256(blob).hexdigest()[:32]
+
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers={"ETag": etag})
+
+    logging.info(
+        "[HTTP] Serving user export: %d records (%d bytes)",
+        len(blob) // EXPORT_RECORD.size,
+        len(blob),
+    )
+    return Response(
+        content=blob,
+        media_type="application/octet-stream",
+        headers={"ETag": etag},
+    )
 
 
 @app.get("/users/-/sync")

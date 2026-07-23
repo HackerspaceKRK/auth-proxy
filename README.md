@@ -65,6 +65,26 @@ Retrieves a user by their associated card ID. The service handles multiple card 
 }
 ```
 
+### export.bin
+
+Generate an export of all active users in a binary format for caching on the door controller.
+
+This file shall be used as a backup if auth-proxy fails.
+
+**Endpoint:** `GET /users/-/export.bin`
+
+**Response:** `application/octet-stream` — array of records described below,
+**sorted ascending by card ID**.
+
+| Offset | Size | Field | Notes |
+| --- | --- | --- | --- |
+| 0 | 1 | `flags` | Reserved, currently always `0` |
+| 1 | 4 | `card_id` | `uint32` — numeric value of the 8-hex-char MIFARE ID |
+| 5 | 8 | `expiration` | `uint64` — membership expiry as a Unix timestamp |
+| 13 | 24 | `username` | NUL-padded, truncated to 24 bytes |
+
+
+
 ### WebSocket API
 
 For real-time communication, a WebSocket endpoint is available.
