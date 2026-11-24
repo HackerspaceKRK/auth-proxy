@@ -104,7 +104,10 @@ def auth():
 
 async def fetch(timeout=60.0) -> list[User]:
     async with httpx.AsyncClient(
-        headers={"Authorization": f"Bearer {config.authentik_token}"},
+        headers={
+            "Authorization": f"Bearer {config.authentik_token}",
+            "User-agent": "HSKRK/auth-proxy",
+        },
         timeout=timeout,
     ) as client:
         url = (
