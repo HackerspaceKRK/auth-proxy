@@ -202,12 +202,17 @@ async def get_user_stats():
 
 @app.get("/users/-/by-card/{card_id}")
 async def get_user_by_card(card_id: str):
+    if len(users) == 0:
+        return Response(
+            status_code=503, content=b"Users not synced yet", media_type="text/plain"
+        )
     user = users_by_card.get(card_id.lower())
     if user is None:
         logging.warning("[WS] Card %s not found", card_id)
         raise HTTPException(status_code=404, detail="Item not found")
     logging.info("[HTTP] User %s (%s) found", user.uid, card_id)
     return user
+
 
 EXPORT_RECORD = struct.Struct("<BIQ24s")
 
@@ -235,13 +240,11 @@ def build_users_export() -> bytes:
 
 @app.get("/users/-/export.bin")
 async def export_users_bin(request: Request):
-    """Binary dump of all active cards, for devices that cache users locally.
-
-    """
+    """Binary dump of all active cards, for devices that cache users locally."""
 
     if len(users) == 0:
         return Response(
-           status_code=503, content=b"No users to export", media_type="text/plain"
+            status_code=503, content=b"No users to export", media_type="text/plain"
         )
 
     blob = build_users_export()
