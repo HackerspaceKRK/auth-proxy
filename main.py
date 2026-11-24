@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 import time
 
-import httpx
+import httpx2
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 from fastapi_utilities import repeat_every
@@ -103,7 +103,7 @@ def auth():
 
 
 async def fetch(timeout=60.0) -> list[User]:
-    async with httpx.AsyncClient(
+    async with httpx2.AsyncClient(
         headers={
             "Authorization": f"Bearer {config.authentik_token}",
             "User-agent": "HSKRK/auth-proxy",
@@ -124,7 +124,7 @@ async def fetch(timeout=60.0) -> list[User]:
                 parsed_response = response.json()
                 results += parsed_response["results"]
                 next_page = parsed_response["pagination"]["next"]
-            except httpx.ReadTimeout as t:
+            except httpx2.ReadTimeout as t:
                 logging.warning(
                     f"[HTTP] Timeout {timeout} reached on fetching users data, page: {next_page}, {t}"
                 )
@@ -134,17 +134,22 @@ async def fetch(timeout=60.0) -> list[User]:
 
 @repeat_every(seconds=300)
 async def fetch_users():
+    await sync_users()
+
+
+async def sync_users(timeout=60.0) -> bool:
     global users
     global users_by_card
     try:
         logging.debug("Fetching users from Authentik")
-        users = await fetch()
+        users = await fetch(timeout=timeout)
     except Exception as ex:
         logging.exception("Failed to fetch users")
         global users_last_failed_run
         global users_last_failed_reason
         users_last_failed_run = datetime.now(tz=UTC)
         users_last_failed_reason = ex
+        return False
     else:
         global users_last_success_run
         users_last_success_run = datetime.now(tz=UTC)
@@ -173,6 +178,7 @@ async def fetch_users():
         logging.debug(
             f"Fetched {len(users)} users ({len(users_by_card)} cards) from Authentik"
         )
+        return True
 
 
 @app.get("/users/-/stats")
@@ -267,36 +273,20 @@ async def export_users_bin(request: Request):
 
 @app.get("/users/-/sync")
 async def sync_on_demand():
-    global users_last_success_run
-    global users_last_failed_run
-    current_run = datetime.now(tz=UTC)
-    diff_seconds = (
-        current_run
-        - (
-            users_last_success_run
-            if users_last_success_run
-            else datetime(2026, 1, 1, tzinfo=UTC)
-        )
-    ).seconds
-    if diff_seconds < 30:
+    diff_seconds = None
+    if users_last_success_run:
+        diff_seconds = (datetime.now(tz=UTC) - users_last_success_run).total_seconds()
+    if diff_seconds is not None and diff_seconds < 30:
         logging.debug("Skipping fetching users, data fresh")
         res = {"cached": True, "status": "success"}
-        res.update(await get_user_stats())
-        return res
     else:
         logging.debug(
-            "Last successful fetch {diff_seconds}s before. Fetching on demand"
+            f"Last successful fetch {diff_seconds}s before. Fetching on demand"
         )
-        status = "succes"
-        try:
-            await fetch_users(timeout=120.0)
-        except httpx.HTTPError as err:
-            logging.error(f"Failed to fetch users: {err.message}")
-            users_last_failed_run = current_run
-            status = "failed"
-        res = {"cached": False, "status": status}
-        res.update(await get_user_stats())
-        return res
+        success = await sync_users(timeout=120.0)
+        res = {"cached": False, "status": "success" if success else "failed"}
+    res.update(await get_user_stats())
+    return res
 
 
 @app.websocket("/ws")
